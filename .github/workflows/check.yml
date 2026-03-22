@@ -1,0 +1,42 @@
+name: suisei-shop-check
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup-node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: restore-cache
+        uses: actions/cache@v4
+        with:
+          path: known_codes.json
+          key: known-codes-${{ github.run_id }}
+          restore-keys: |
+            known-codes-
+
+      - name: run-check
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: node check.js
+
+      - name: save-cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: known_codes.json
+          key: known-codes-${{ github.run_id }}
