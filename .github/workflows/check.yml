@@ -1,0 +1,42 @@
+name: 星街すいせいFCショップ 新商品チェック
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"  # 5分ごとに実行
+  workflow_dispatch:        # 手動実行ボタンも有効
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.js セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: 前回の既知コードファイルを復元
+        uses: actions/cache@v4
+        with:
+          path: known_codes.json
+          key: known-codes-${{ github.run_id }}
+          restore-keys: |
+            known-codes-
+
+      - name: 新商品チェック・通知
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: node check.js
+
+      - name: 既知コードファイルを保存
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: known_codes.json
+          key: known-codes-${{ github.run_id }}
