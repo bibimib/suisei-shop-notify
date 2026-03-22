@@ -32,6 +32,7 @@ jobs:
       - name: run-news-check
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TIMELINE_GITHUB_TOKEN: ${{ secrets.TIMELINE_GITHUB_TOKEN }}
         run: node news-check.js
 
       - name: save-cache

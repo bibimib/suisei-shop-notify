@@ -7,6 +7,41 @@ const KNOWN_CODES_FILE = "known_codes.json";
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 const fs = require("fs");
 
+const TIMELINE_TOKEN = process.env.TIMELINE_GITHUB_TOKEN;
+
+async function appendToTimeline(newItems) {
+  if (!TIMELINE_TOKEN || newItems.length === 0) return;
+  const apiUrl = "https://api.github.com/repos/bibimib/oshi-timeline/contents/feed.json";
+  const headers = {
+    Authorization: `Bearer ${TIMELINE_TOKEN}`,
+    "User-Agent": "oshi-timeline-writer",
+    "Content-Type": "application/json",
+  };
+  const getRes = await fetch(apiUrl, { headers });
+  let currentItems = [];
+  let sha = null;
+  if (getRes.ok) {
+    const data = await getRes.json();
+    sha = data.sha;
+    currentItems = JSON.parse(Buffer.from(data.content, "base64").toString("utf-8"));
+  }
+  const existingIds = new Set(currentItems.map(i => i.id));
+  const toAdd = newItems.filter(i => !existingIds.has(i.id));
+  if (toAdd.length === 0) return;
+  const newFeed = [...toAdd, ...currentItems].slice(0, 200);
+  const putRes = await fetch(apiUrl, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({
+      message: `フィード更新: ${toAdd.length}件追加`,
+      content: Buffer.from(JSON.stringify(newFeed, null, 2)).toString("base64"),
+      sha,
+    }),
+  });
+  if (!putRes.ok) console.warn(`タイムライン更新失敗: ${putRes.status}`);
+  else console.log(`タイムラインに${toAdd.length}件追加しました`);
+}
+
 // 既知の商品コードを読み込む
 function loadKnownCodes() {
   if (fs.existsSync(KNOWN_CODES_FILE)) {
@@ -140,6 +175,18 @@ async function main() {
 
   for (const item of newItems) {
     await sendDiscordNotification(item);
+    await appendToTimeline([{
+      id: `suisei-shop-${item.item_code}`,
+      sourceKey: "suisei",
+      sourceLabel: "星詠み",
+      sourceColor: "#FF8C00",
+      title: item.item_name,
+      url: buildItemUrl(item),
+      price: item.min_price || null,
+      image: item.item_img_url || null,
+      discoveredAt: new Date().toISOString(),
+      type: "shop",
+    }]);
     const label = isFcLimited(item) ? "（FC限定）" : "";
     console.log(`通知送信: ${item.item_name}${label}`);
     knownCodes.add(String(item.item_code));
