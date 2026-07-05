@@ -17,29 +17,51 @@ async function appendToTimeline(newItems) {
     "User-Agent": "oshi-timeline-writer",
     "Content-Type": "application/json",
   };
-  const getRes = await fetch(apiUrl, { headers });
-  let currentItems = [];
-  let sha = null;
-  if (getRes.ok) {
+  try {
+    const getRes = await fetch(apiUrl, { headers });
+    if (!getRes.ok) {
+      // 取得に失敗したまま書き込むと既存フィードを消しかねないので必ず中断
+      await alertTimelineFailure(`feed.json取得に失敗（HTTP ${getRes.status}）`);
+      return;
+    }
     const data = await getRes.json();
-    sha = data.sha;
-    currentItems = JSON.parse(Buffer.from(data.content, "base64").toString("utf-8"));
+    const sha = data.sha;
+    const currentItems = JSON.parse(Buffer.from(data.content, "base64").toString("utf-8"));
+    const existingIds = new Set(currentItems.map(i => i.id));
+    const toAdd = newItems.filter(i => !existingIds.has(i.id));
+    if (toAdd.length === 0) return;
+    const newFeed = [...toAdd, ...currentItems].slice(0, 200);
+    const putRes = await fetch(apiUrl, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        message: `フィード更新: ${toAdd.length}件追加`,
+        content: Buffer.from(JSON.stringify(newFeed, null, 2)).toString("base64"),
+        sha,
+      }),
+    });
+    if (!putRes.ok) await alertTimelineFailure(`feed.json書き込みに失敗（HTTP ${putRes.status}）`);
+    else console.log(`タイムラインに${toAdd.length}件追加しました`);
+  } catch (e) {
+    await alertTimelineFailure(`予期しないエラー: ${e.message}`);
   }
-  const existingIds = new Set(currentItems.map(i => i.id));
-  const toAdd = newItems.filter(i => !existingIds.has(i.id));
-  if (toAdd.length === 0) return;
-  const newFeed = [...toAdd, ...currentItems].slice(0, 200);
-  const putRes = await fetch(apiUrl, {
-    method: "PUT",
-    headers,
-    body: JSON.stringify({
-      message: `フィード更新: ${toAdd.length}件追加`,
-      content: Buffer.from(JSON.stringify(newFeed, null, 2)).toString("base64"),
-      sha,
-    }),
-  });
-  if (!putRes.ok) console.warn(`タイムライン更新失敗: ${putRes.status}`);
-  else console.log(`タイムラインに${toAdd.length}件追加しました`);
+}
+
+// タイムライン更新の失敗をDiscordに通知（トークン期限切れで静かに止まっていた事故の再発防止）
+async function alertTimelineFailure(reason) {
+  console.warn(`タイムライン更新失敗: ${reason}`);
+  if (!DISCORD_WEBHOOK_URL) return;
+  try {
+    await fetch(DISCORD_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content: `⚠️ **おし蔵タイムラインの更新に失敗** [suisei-shop-notify shop]\n${reason}\nHTTP 401の場合は TIMELINE_GITHUB_TOKEN の期限切れ・失効が濃厚です。`,
+      }),
+    });
+  } catch (e) {
+    console.warn(`失敗通知の送信もエラー: ${e.message}`);
+  }
 }
 
 // 既知の商品コードを読み込む
