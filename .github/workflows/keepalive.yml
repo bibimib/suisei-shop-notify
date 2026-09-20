@@ -1,0 +1,44 @@
+name: keepalive
+
+# GitHub は「リポジトリに60日間なにも更新がない」と、定期実行ワークフローを
+# 自動で停止する。実際に 2026-09-03、これが原因で通知が止まった。
+# 対策として月1回だけ動き、次の2つをやる。
+#   1. 空コミットを push して 60日タイマーをリセットする（本命）
+#   2. それでも止まっていたワークフローを enable し直す（保険）
+
+on:
+  schedule:
+    - cron: '0 3 2 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 空コミットで60日タイマーをリセット
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "keepalive: 60日ルール対策の自動コミット"
+          git push
+
+      - name: 停止中のワークフローを復活させる
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ids=$(gh workflow list --all --json id,state | jq -r '.[] | select(.state == "disabled_inactivity") | .id')
+          if [ -z "$ids" ]; then
+            echo "停止中のワークフローはありません"
+            exit 0
+          fi
+          for id in $ids; do
+            echo "復活させる: $id"
+            gh workflow enable "$id"
+          done
