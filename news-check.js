@@ -130,12 +130,26 @@ async function sendDiscordNotification(item) {
     ],
   };
 
-  const res = await fetch(DISCORD_WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(`Discord通知失敗: ${res.status}`);
+  await postDiscord(payload);
+}
+
+// Discordに送る。送りすぎ（429）と言われたら、言われた秒数だけ待って送り直す（3回まで）
+async function postDiscord(payload) {
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(DISCORD_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) return;
+    if (res.status === 429 && attempt < 3) {
+      const body = await res.json().catch(() => ({}));
+      const waitSec = Math.min(Number(body.retry_after ?? res.headers.get("retry-after")) || 1, 30);
+      await new Promise((r) => setTimeout(r, waitSec * 1000));
+      continue;
+    }
+    throw new Error(`Discord通知失敗: ${res.status}`);
+  }
 }
 
 // メイン処理
@@ -172,8 +186,20 @@ async function main() {
 
   console.log(`新着ニュース ${newItems.length}件 を検出！`);
 
+  // 1件届くたびに名簿へ書く
+  // （全部終わってから書くと、途中の1件の失敗で、送れた分まで次の回にまた届いてしまう）
+  const failures = [];
   for (const item of newItems) {
-    await sendDiscordNotification(item);
+    try {
+      await sendDiscordNotification(item);
+    } catch (e) {
+      console.error(`通知失敗: ${item.title}（${e.message}）`);
+      failures.push(item.title);
+      continue;
+    }
+    knownIds.add(item.id);
+    saveKnownIds(knownIds);
+    console.log(`通知送信: ${item.title}`);
     await appendToTimeline([{
       id: `suisei-news-${item.id}`,
       sourceKey: "suisei",
@@ -186,15 +212,20 @@ async function main() {
       discoveredAt: new Date().toISOString(),
       type: "news",
     }]);
-    console.log(`通知送信: ${item.title}`);
-    knownIds.add(item.id);
   }
 
-  saveKnownIds(knownIds);
+  if (failures.length > 0) {
+    // 届かなかった分は名簿に入れていないので、次の回に送り直される。実行は赤にして気づけるようにする
+    throw new Error(`Discord通知に失敗: ${failures.length}件（${failures.join(" / ")}）`);
+  }
   console.log("完了！");
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
+
+module.exports = { main };

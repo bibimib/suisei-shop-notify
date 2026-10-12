@@ -1,3 +1,4 @@
 known_codes.json
 node_modules/
 .env
+.test-tmp-*/
